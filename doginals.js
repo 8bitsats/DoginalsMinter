@@ -1,50 +1,52 @@
 #!/usr/bin/env node
 
-const dogecore = require('bitcore-lib-doge')
-const axios = require('axios')
-const fs = require('fs')
-const dotenv = require('dotenv')
-const mime = require('mime-types')
-const express = require('express')
-const { PrivateKey, Address, Transaction, Script, Opcode } = dogecore
-const { Hash, Signature } = dogecore.crypto
+const dogecore = require('bitcore-lib-doge');
+const axios = require('axios');
+const fs = require('fs');
+const dotenv = require('dotenv');
+const mime = require('mime-types');
+const express = require('express');
+const { PrivateKey, Address, Transaction, Script, Opcode } = dogecore;
+const { Hash, Signature } = dogecore.crypto;
 
-dotenv.config()
+dotenv.config();
 
 if (process.env.TESTNET == 'true') {
-    dogecore.Networks.defaultNetwork = dogecore.Networks.testnet
+    dogecore.Networks.defaultNetwork = dogecore.Networks.testnet;
 }
 
 if (process.env.FEE_PER_KB) {
-    Transaction.FEE_PER_KB = parseInt(process.env.FEE_PER_KB)
+    Transaction.FEE_PER_KB = parseInt(process.env.FEE_PER_KB);
 } else {
-    Transaction.FEE_PER_KB = 100000000
+    Transaction.FEE_PER_KB = 100000000;
 }
 
-const WALLET_PATH = process.env.WALLET || '.wallet.json'
+const WALLET_PATH = process.env.WALLET || '.wallet.json';
 
 async function main() {
-    let cmd = process.argv[2]
+    let cmd = process.argv[2];
 
     if (fs.existsSync('pending-txs.json')) {
-        console.log('found pending-txs.json. rebroadcasting...')
-        const txs = JSON.parse(fs.readFileSync('pending-txs.json'))
-        await broadcastAll(txs.map(tx => new Transaction(tx)), false)
-        return
+        console.log('found pending-txs.json. rebroadcasting...');
+        const txs = JSON.parse(fs.readFileSync('pending-txs.json'));
+        await broadcastAll(txs.map(tx => new Transaction(tx)), false);
+        return;
     }
 
+
     if (cmd == 'mint') {
-        await mint()
+        await mint();
     } else if (cmd == 'wallet') {
-        await wallet()
+        await wallet();
     } else if (cmd == 'server') {
-        await server()
+        await server();
     } else if (cmd == 'drc-20') {
-        await doge20()
+        await doge20();
     } else {
-        throw new Error(`unknown command: ${cmd}`)
+        throw new Error(`unknown command: ${cmd}`);
     }
 }
+
 
 async function doge20() {
   let subcmd = process.argv[3]
@@ -126,16 +128,16 @@ async function wallet() {
 }
 
 
-function walletNew() {
-    if (!fs.existsSync(WALLET_PATH)) {
-        const privateKey = new PrivateKey()
-        const privkey = privateKey.toWIF()
-        const address = privateKey.toAddress().toString()
-        const json = { privkey, address, utxos: [] }
-        fs.writeFileSync(WALLET_PATH, JSON.stringify(json, 0, 2))
-        console.log('address', address)
+function walletNew(customWalletPath = WALLET_PATH) {
+    if (!fs.existsSync(customWalletPath)) {
+        const privateKey = new PrivateKey();
+        const privkey = privateKey.toWIF();
+        const address = privateKey.toAddress().toString();
+        const json = { privkey, address, utxos: [] };
+        fs.writeFileSync(customWalletPath, JSON.stringify(json, 0, 2));
+        console.log('New wallet address:', address);
     } else {
-        throw new Error('wallet already exists')
+        console.log('A wallet already exists at the specified path.');
     }
 }
 
@@ -175,32 +177,49 @@ function walletBalance() {
 
 
 async function walletSend() {
-    const argAddress = process.argv[4]
-    const argAmount = process.argv[5]
+    const argAddress = process.argv[4];
+    const argAmount = process.argv[5];
 
-    let wallet = JSON.parse(fs.readFileSync(WALLET_PATH))
+    let wallet = JSON.parse(fs.readFileSync(WALLET_PATH));
 
-    let balance = wallet.utxos.reduce((acc, curr) => acc + curr.satoshis, 0)
-    if (balance == 0) throw new Error('no funds to send')
+    let balance = wallet.utxos.reduce((acc, curr) => acc + curr.satoshis, 0);
+    if (balance == 0) throw new Error('no funds to send');
 
-    let receiver = new Address(argAddress)
-    let amount = parseInt(argAmount)
+    let receiver = new Address(argAddress);
+    let amount = parseInt(argAmount);
 
-    let tx = new Transaction()
+    let tx = new Transaction();
     if (amount) {
-        tx.to(receiver, amount)
-        fund(wallet, tx)
+        tx.to(receiver, amount);
+        fund(wallet, tx);
     } else {
-        tx.from(wallet.utxos)
-        tx.change(receiver)
-        tx.sign(wallet.privkey)
+        tx.from(wallet.utxos);
+        tx.change(receiver);
+        tx.sign(wallet.privkey);
     }
+    // On successful broadcast, generate a new wallet
+     await broadcast(tx, true, () => {
+        // Generate a new wallet with a dynamically named path
+        const newWalletPath = `.wallet_${new Date().toISOString()}.json`;
+        walletNew(newWalletPath);
+    });
 
-    await broadcast(tx, true)
-
-    console.log(tx.hash)
+    console.log(tx.hash);
 }
 
+// Modify walletNew to optionally accept a custom path for the new wallet
+function walletNew(customWalletPath = WALLET_PATH) {
+    if (!fs.existsSync(customWalletPath)) {
+        const privateKey = new PrivateKey();
+        const privkey = privateKey.toWIF();
+        const address = privateKey.toAddress().toString();
+        const json = { privkey, address, utxos: [] };
+        fs.writeFileSync(customWalletPath, JSON.stringify(json, 0, 2));
+        console.log('New wallet address:', address);
+    } else {
+        console.log('A wallet already exists at the specified path.');
+    }
+}
 
 async function walletSplit() {
     let splits = parseInt(process.argv[4])
@@ -594,7 +613,8 @@ function server() {
 }
 
 
+
 main().catch(e => {
-    let reason = e.response && e.response.data && e.response.data.error && e.response.data.error.message
-    console.error(reason ? e.message + ':' + reason : e.message)
-})
+    let reason = e.response && e.response.data && e.response.data.error && e.response.data.error.message;
+    console.error(reason ? e.message + ':' + reason : e.message);
+});
